@@ -1,0 +1,140 @@
+name: "Yocto Build for mys-8mmx board"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  yocto-build:
+    runs-on: [yocto-builder, embedded-builder]
+    timeout-minutes: 1440
+
+    env:
+      YOCTO_IMAGE_NAME: mys-8mmx-yocto-build-image
+      CONTAINER_NAME: mys-8mmx-yocto-builder
+      HOST_DL_DIR: ~/yocto-downloads
+      HOST_SSTATE_DIR: ~/yocto-sstate-cache
+
+    steps:
+      - name: Ensure correct workspace permissions for workspace & temporary files
+        run: |
+          if [ -n "${{ github.workspace }}" ]; then
+            sudo rm -rf "${{ github.workspace }}"
+            mkdir -p "${{ github.workspace }}"
+          fi
+          sudo rm -rf ~/tmp_automation_ssh
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare persistent DL_DIR and SSTATE_DIR
+        run: |
+          mkdir -p ~/yocto-downloads
+          mkdir -p ~/yocto-sstate-cache
+
+      - name: Build Docker image (Yocto 3.0, Ubuntu 18.04)
+        run: |
+          sudo docker build -t $YOCTO_IMAGE_NAME -f docker/Dockerfile . 
+
+      - name: Clean old container if exists
+        run: |
+          set +e
+          sudo docker rm -f $CONTAINER_NAME
+          set -e
+
+      - name: Prepare SSH key for automation
+        run: |
+          mkdir -p ~/tmp_automation_ssh
+          cp ~/.ssh/id_rsa-automation-bot-svc ~/tmp_automation_ssh/id_rsa
+          cp ~/.ssh/id_rsa-automation-bot-svc.pub ~/tmp_automation_ssh/id_rsa.pub
+          chmod -R 700 ~/tmp_automation_ssh
+          chmod 600 ~/tmp_automation_ssh/id_rsa
+          chmod 644 ~/tmp_automation_ssh/id_rsa.pub
+          ssh-keyscan github.com >> ~/tmp_automation_ssh/known_hosts
+
+      # Start Docker container
+      - name: Start container (repo + automation key)
+        run: |
+          sudo docker run -d --name $CONTAINER_NAME \
+            -v ${{ github.workspace }}:/home/build/workspace \
+            -v ~/tmp_automation_ssh:/home/build/.ssh \
+            -v ~/yocto-downloads:/home/build/workspace/downloads \
+            -v ~/yocto-sstate-cache:/home/build/workspace/sstate-cache \
+            $YOCTO_IMAGE_NAME tail -f /dev/null
+
+      - name: Handle permissions within the container
+        run: |
+            sudo docker exec -u 0 $CONTAINER_NAME chown -R build:build /home/build/
+
+      - name: Prepare Yocto build directory & fetch all sources
+        run: |
+          sudo docker exec $CONTAINER_NAME bash -c '
+          set -e
+          cd /home/build/workspace
+          export LANG=en_US.UTF-8
+          export DISTRO=fsl-imx-xwayland
+          export MACHINE=mys-8mmx
+          export EULA=1
+          source sources/meta-myir/tools/myir-setup-release.sh -b build-xwayland
+          echo "DL_DIR = \"/home/build/workspace/downloads\"" >> conf/local.conf
+          echo "SSTATE_DIR = \"/home/build/workspace/sstate-cache\"" >> conf/local.conf
+          echo "BB_NUMBER_THREADS = \"$(nproc)\"" >> conf/local.conf
+          echo "PARALLEL_MAKE = \"-j$(nproc)\"" >> conf/local.conf
+          echo "INHERIT += \"buildstats\"" >> conf/local.conf
+          bitbake myir-image-full --runall=fetch'
+
+      - name: Build Yocto image
+        run: |
+          sudo docker exec $CONTAINER_NAME bash -c '
+          set -e
+          cd /home/build/workspace
+          export LANG=en_US.UTF-8
+          export DISTRO=fsl-imx-xwayland
+          export MACHINE=mys-8mmx
+          export EULA=1
+          source sources/meta-myir/tools/myir-setup-release.sh -b build-xwayland
+          echo "DL_DIR = \"/home/build/workspace/downloads\"" >> conf/local.conf
+          echo "SSTATE_DIR = \"/home/build/workspace/sstate-cache\"" >> conf/local.conf
+          echo "BB_NUMBER_THREADS = \"$(nproc)\"" >> conf/local.conf
+          echo "PARALLEL_MAKE = \"-j$(nproc)\"" >> conf/local.conf
+          echo "INHERIT += \"buildstats\"" >> conf/local.conf
+          bitbake myir-image-full'
+
+      - name: Post build cleanup
+        run: |
+          if [ -n "${{ github.workspace }}" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "${{ github.workspace }}"
+          fi
+          sudo rm -rf ~/tmp_automation_ssh
+
+      - name: Prepare artifact staging directory
+        run: |
+          set -e
+          ARTIFACTS_SRC=./build-xwayland/tmp/deploy/images/mys-8mmx
+          ARTIFACTS_STAGE=./build-artifacts
+
+          mkdir -p "$ARTIFACTS_STAGE"
+
+          # 1. Copy actual files matching your requirements (dereferenced content)
+          cp -a $ARTIFACTS_SRC/myir-image-full-mys-8mmx*.sdcard.bz2 "$ARTIFACTS_STAGE/" || true
+          cp -a $ARTIFACTS_SRC/Image* "$ARTIFACTS_STAGE/" || true
+          cp -a $ARTIFACTS_SRC/*.dtb "$ARTIFACTS_STAGE/" || true
+          cp -a $ARTIFACTS_SRC/u-boot*.bin "$ARTIFACTS_STAGE/" || true
+          cp -a $ARTIFACTS_SRC/u-boot-spl*.bin "$ARTIFACTS_STAGE/" || true
+          cp -a $ARTIFACTS_SRC/imx-boot-mys-8mmx-sd.bin-flash_ddr4_evk "$ARTIFACTS_STAGE/" || true
+          cp -a $ARTIFACTS_SRC/myir-image-full-mys-8mmx*.rootfs.tar.bz2 "$ARTIFACTS_STAGE/" || true
+
+          # Optional: List what is being archived for CI diagnosis
+          ls -lh "$ARTIFACTS_STAGE"
+          mkdir -p archive
+          cd ./build-artifacts/
+          zip -r --symlinks ../build-artifacts-${{ github.run_number }}.zip .
+          cd ..
+
+      - name: Archive Yocto build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build-artifacts-${{ github.run_number }}.zip
+
+
+

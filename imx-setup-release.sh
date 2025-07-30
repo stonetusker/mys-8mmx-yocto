@@ -1,0 +1,1 @@
+sources/meta-myir/tools/imx-setup-release.sh

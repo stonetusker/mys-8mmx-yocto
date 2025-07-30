@@ -1,0 +1,51 @@
+*.pyc
+*.pyo
+*.swp
+*.orig
+*.rej
+*~
+
+# Patch files
+/*.patch
+/*.diff
+
+# Build directories and artifacts
+build*/
+downloads/
+sstate-cache/
+tmp/
+pstage/
+hob-image-*.bb
+
+# BitBake Toaster and Bitbake leftovers
+bitbake/lib/toaster/contrib/tts/backlog.txt
+bitbake/lib/toaster/contrib/tts/log/*
+bitbake/lib/toaster/contrib/tts/.cache/*
+bitbake/lib/bb/tests/runqueue-tests/bitbake-cookerdaemon.log
+_toaster_clones/
+
+# IDE/workspace
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Avoid ignoring templates, useful meta-layers
+meta-*/
+!meta-skeleton
+!meta-poky
+!meta-yocto
+!meta-yocto-bsp
+!meta-yocto-imported
+!meta-selftest
+
+# Documentation builds
+/documentation/*/eclipse/
+/documentation/*/*.html
+/documentation/*/*.pdf
+/documentation/*/*.tgz
+
+# Misc
+pull-*/
+pyshtables.py
+scripts/oe-git-proxy-socks
+

@@ -1,0 +1,1 @@
+sources/meta-myir/tools/myir-setup-release.sh
